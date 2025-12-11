@@ -11,9 +11,6 @@ import contactRoutes from './routes/contact.js';
 const app = express();
 app.use(cors());
 
-// Increase body size limit to handle base64 PDF uploads
-// Base64 encoding increases size by ~33%, so 10MB file = ~13.3MB base64
-// Setting limit to 15MB to be safe
 app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 
