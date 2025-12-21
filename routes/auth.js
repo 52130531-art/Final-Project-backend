@@ -1,5 +1,5 @@
 import express from 'express';
-import db from '../db.js';
+import pool from '../db.js';
 
 const router = express.Router();
 
@@ -9,8 +9,8 @@ router.get('/', (req, res) => {
   });
   
   // get all users
-  router.get('/users', (req, res) => {
-    db.query('SELECT * FROM users', (err, results) => {
+  router.get('/users', async (req, res) => {
+    await pool.query('SELECT * FROM users', (err, results) => {
       if (err) {
         console.error('Error querying users:', err);
         return res.status(500).send('Database error');
@@ -21,15 +21,15 @@ router.get('/', (req, res) => {
   });
   
   // create new user
-  router.post('/users', (req, res) => {
+  router.post('/users', async (req, res) => {
     const { name, email, password } = req.body;
     const datenow = new Date().toISOString(); 
 
     // Check if a user with this email already exists
-    db.query(
+    await pool.query(
       'SELECT id FROM users WHERE email = ?',
       [email],
-      (checkErr, existingUsers) => {
+      async (checkErr, existingUsers) => {
         if (checkErr) {
           console.error('Error checking existing user:', checkErr);
           return res.status(500).send('Database error');
@@ -41,16 +41,16 @@ router.get('/', (req, res) => {
         }
 
         // If not exists, insert new user
-        db.query(
+        await pool.query(
           'INSERT INTO users (name, email, password, createdAt) VALUES (?, ?, ?, ?)',
           [name, email, password, datenow],
-          (err, results) => {
+          async (err, results) => {
             if (err) {
               console.error('Error inserting user:', err);
               return res.status(500).send('Database error');
             }
             // Fetch the created user data (without password)
-            db.query(
+            await pool.query(
               'SELECT id, name, email, createdAt FROM users WHERE id = ?',
               [results.insertId],
               (fetchErr, userResults) => {
@@ -68,31 +68,28 @@ router.get('/', (req, res) => {
   });
 
   // signin endpoint
-  router.post('/signin', (req, res) => {
+  router.post('/signin', async (req, res) => {
     const { email, password } = req.body;
 
     if (!email || !password) {
       return res.status(400).send('Email and password are required');
     }
+    try {
+      const [results] = await pool.query(
+        'SELECT id, name, email, isAdmin, createdAt FROM users WHERE email = ? AND password = ?',
+        [email, password],
+        );
+      if (results.length === 0) return res.status(401).send('Invalid email or password');
 
-    db.query(
-      'SELECT id, name, email, createdAt FROM users WHERE email = ? AND password = ?',
-      [email, password],
-      (err, results) => {
-        if (err) {
-          console.error('Error querying user:', err);
-          return res.status(500).send('Database error');
-        }
+    const user = results[0];
+    delete user.password;
+    res.json(user);
 
-        if (results.length === 0) {
-          return res.status(401).send('Invalid email or password');
-        }
-
-        // User found, return user data (password excluded)
-        const user = results[0];
-        res.json(user);
-      }
+  } catch (err) {
+    console.error('Error querying user:', err);
+    res.status(500).send('Database error');
+  }
+  }
     );
-  });
 
   export default router;

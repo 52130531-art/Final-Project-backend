@@ -1,150 +1,141 @@
 import express from 'express';
-import db from '../db.js';
+import pool from '../db.js';
+import { uploadPdf } from '../middlewares/uploadPdf.js';
 
 const router = express.Router();
 
-// Maximum PDF file size: 10MB (in bytes)
-const MAX_PDF_SIZE = 10 * 1024 * 1024; // 10MB
-
-// Helper function to calculate approximate original file size from base64 string
-// Base64 encoding increases size by ~33%, so we divide by 1.33 to get approximate original size
-const getApproximateOriginalSize = (base64String) => {
-    if (!base64String) return 0;
-    // Base64 string length * 3/4 gives approximate original size in bytes
-    return Math.floor((base64String.length * 3) / 4);
-};
-
-// Helper function to validate PDF size
-const validatePdfSize = (pdfBase64) => {
-    if (!pdfBase64) return { valid: true }; // PDF is optional
-    
-    const approximateSize = getApproximateOriginalSize(pdfBase64);
-    
-    if (approximateSize > MAX_PDF_SIZE) {
-        return {
-            valid: false,
-            error: `PDF file size exceeds the maximum allowed size of ${MAX_PDF_SIZE / (1024 * 1024)}MB. Your file is approximately ${(approximateSize / (1024 * 1024)).toFixed(2)}MB.`
-        };
+/**
+ * GET all needy
+ */
+router.get('/', async (req, res) => {
+    try {
+        const [results] = await pool.query('SELECT * FROM needy');
+        res.json(results);
+    } catch (err) {
+        console.error(err);
+        res.status(500).send('Database error');
     }
-    
-    return { valid: true };
-};
-
-router.get('/', (req, res) => {
-    db.query('SELECT * FROM needy', (err, results) => {
-        if (err) {
-            console.error('Error querying needy:', err);
-            return res.status(500).send('Database error');
-        }
-        res.send(results);
-    });
 });
 
-router.post('/', (req, res) => {
-    const { name, email, location, phone, description, pdf } = req.body;
-    
-    // Validate PDF size if provided
-    if (pdf) {
-        const sizeValidation = validatePdfSize(pdf);
-        if (!sizeValidation.valid) {
-            return res.status(400).json({ error: sizeValidation.error });
-        }
-    }
-    
-    const datenow = new Date().toISOString();
-    const isApproved = false; // Default to not approved
-    
+/**
+ * POST needy with PDF upload
+ */
+router.post(
+    '/',
+    uploadPdf.single('pdf'),
+    async (req, res) => {
+        try {
+            const { name, email, location, phone, description } = req.body;
 
-    db.query(
-        'INSERT INTO needy (name, email, location, phone, isApproved, description, pdf, createdAt, UpdatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [name, email, location || null, phone, isApproved, description || null, pdf || null, datenow, datenow],
-        (err, results) => {
-            if (err) {
-                console.error('Error inserting needy:', err);
-                return res.status(500).send('Database error');
-            }
-            // Fetch the created needy data
-            db.query(
-                'SELECT * FROM needy WHERE id = ?',
-                [results.insertId],
-                (fetchErr, needyResults) => {
-                    if (fetchErr) {
-                        console.error('Error fetching created needy:', fetchErr);
-                        return res.status(500).send('Database error');
-                    }
-                    res.json(needyResults[0]);
-                }
+            const documentPath = req.file
+                ? req.file.path
+                : null;
+
+            const datenow = new Date();
+            const isApproved = false;
+
+            const [result] = await pool.query(
+                `INSERT INTO needy 
+                (name, email, location, phone, isApproved, description, document_path, createdAt, UpdatedAt)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                    name,
+                    email,
+                    location || null,
+                    phone,
+                    isApproved,
+                    description || null,
+                    documentPath,
+                    datenow,
+                    datenow
+                ]
             );
-        }
-    );
-});
 
-// Get needy by ID
-router.get('/:id', (req, res) => {
-    const { id } = req.params;
-    
-    db.query('SELECT * FROM needy WHERE id = ?', [id], (err, results) => {
-        if (err) {
-            console.error('Error querying needy:', err);
-            return res.status(500).send('Database error');
-        }
-        
-        if (results.length === 0) {
-            return res.status(404).send('Needy request not found');
-        }
-        
-        res.json(results[0]);
-    });
-});
+            const [rows] = await pool.query(
+                'SELECT * FROM needy WHERE id = ?',
+                [result.insertId]
+            );
 
-// Update needy by ID
-router.put('/:id', (req, res) => {
-    const { id } = req.params;
-    const { name, email, location, phone, isApproved, description, pdf } = req.body;
-    
-    // Validate PDF size if provided
-    if (pdf) {
-        const sizeValidation = validatePdfSize(pdf);
-        if (!sizeValidation.valid) {
-            return res.status(400).json({ error: sizeValidation.error });
+            res.json(rows[0]);
+        } catch (err) {
+            console.error(err);
+            res.status(500).json({ message: 'Upload failed' });
         }
     }
-    
-    const updatedAt = new Date().toISOString();
-    
-    // First check if needy exists
-    db.query('SELECT * FROM needy WHERE id = ?', [id], (checkErr, checkResults) => {
-        if (checkErr) {
-            console.error('Error checking needy:', checkErr);
-            return res.status(500).send('Database error');
-        }
-        
-        if (checkResults.length === 0) {
+);
+
+/**
+ * GET needy by ID
+ */
+router.get('/:id', async (req, res) => {
+    const [rows] = await pool.query(
+        'SELECT * FROM needy WHERE id = ?',
+        [req.params.id]
+    );
+
+    if (!rows.length) {
+        return res.status(404).send('Needy request not found');
+    }
+
+    res.json(rows[0]);
+});
+
+/**
+ * UPDATE needy + optional PDF replacement
+ */
+router.put(
+    '/:id',
+    uploadPdf.single('pdf'),
+    async (req, res) => {
+        const { id } = req.params;
+        const { name, email, location, phone, isApproved, description } = req.body;
+
+        const [existing] = await pool.query(
+            'SELECT * FROM needy WHERE id = ?',
+            [id]
+        );
+
+        if (!existing.length) {
             return res.status(404).send('Needy request not found');
         }
-        
-        // Update needy
-        db.query(
-            'UPDATE needy SET name = ?, email = ?, location = ?, phone = ?, isApproved = ?, description = ?, pdf = ?, UpdatedAt = ? WHERE id = ?',
-            [name, email, location || null, phone, isApproved !== undefined ? isApproved : checkResults[0].isApproved, description || null, pdf !== undefined ? pdf : checkResults[0].pdf, updatedAt, id],
-            (err, results) => {
-                if (err) {
-                    console.error('Error updating needy:', err);
-                    return res.status(500).send('Database error');
-                }
-                
-                // Fetch updated needy data
-                db.query('SELECT * FROM needy WHERE id = ?', [id], (fetchErr, needyResults) => {
-                    if (fetchErr) {
-                        console.error('Error fetching updated needy:', fetchErr);
-                        return res.status(500).send('Database error');
-                    }
-                    res.json(needyResults[0]);
-                });
-            }
+
+        const documentPath = req.file
+            ? req.file.path
+            : existing[0].document_path;
+
+        const updatedAt = new Date();
+
+        await pool.query(
+            `UPDATE needy SET 
+                name = ?, 
+                email = ?, 
+                location = ?, 
+                phone = ?, 
+                isApproved = ?, 
+                description = ?, 
+                document_path = ?, 
+                UpdatedAt = ?
+            WHERE id = ?`,
+            [
+                name,
+                email,
+                location || null,
+                phone,
+                isApproved ?? existing[0].isApproved,
+                description || null,
+                documentPath,
+                updatedAt,
+                id
+            ]
         );
-    });
-});
+
+        const [rows] = await pool.query(
+            'SELECT * FROM needy WHERE id = ?',
+            [id]
+        );
+
+        res.json(rows[0]);
+    }
+);
 
 export default router;
-

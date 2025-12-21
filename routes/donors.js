@@ -1,6 +1,6 @@
 import express from 'express';
 import Stripe from 'stripe';
-import db from '../db.js';
+import pool from '../db.js';
 
 const router = express.Router();
 
@@ -10,8 +10,8 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
     apiVersion: '2024-12-18.acacia',
 });
 
-router.get('/', (req, res) => {
-    db.query('SELECT * FROM donors', (err, results) => {
+router.get('/', async (req, res) => {
+    await pool.query('SELECT * FROM donors', (err, results) => {
         if (err) {
             console.error('Error querying donors:', err);
             return res.status(500).send('Database error');
@@ -20,22 +20,22 @@ router.get('/', (req, res) => {
     });
 });
 
-router.post('/', (req, res) => {
+router.post('/', async(req, res) => {
     const { name, email, location, phone, creditcart, description } = req.body;
     const datenow = new Date().toISOString();
     const isApproved = false; // Default to not approved
     
 
-    db.query(
+    await pool.query(
         'INSERT INTO donors (name, email, location, phone, creditcart, isApproved, description, createdAt, UpdatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [name, email, location || null, phone, creditcart || null, isApproved, description || null, datenow, datenow],
-        (err, results) => {
+        async(err, results) => {
             if (err) {
                 console.error('Error inserting donor:', err);
                 return res.status(500).send('Database error');
             }
             // Fetch the created donor data
-            db.query(
+            await pool.query(
                 'SELECT * FROM donors WHERE id = ?',
                 [results.insertId],
                 (fetchErr, donorResults) => {
@@ -51,10 +51,10 @@ router.post('/', (req, res) => {
 });
 
 // Get donor by ID
-router.get('/:id', (req, res) => {
+router.get('/:id', async(req, res) => {
     const { id } = req.params;
     
-    db.query('SELECT * FROM donors WHERE id = ?', [id], (err, results) => {
+    await pool.query('SELECT * FROM donors WHERE id = ?', [id], (err, results) => {
         if (err) {
             console.error('Error querying donor:', err);
             return res.status(500).send('Database error');
@@ -69,13 +69,13 @@ router.get('/:id', (req, res) => {
 });
 
 // Update donor by ID
-router.put('/:id', (req, res) => {
+router.put('/:id', async(req, res) => {
     const { id } = req.params;
     const { name, email, location, phone, creditcart, isApproved, description } = req.body;
     const updatedAt = new Date().toISOString();
     
     // First check if donor exists
-    db.query('SELECT * FROM donors WHERE id = ?', [id], (checkErr, checkResults) => {
+    await pool.query('SELECT * FROM donors WHERE id = ?', [id], async(checkErr, checkResults) => {
         if (checkErr) {
             console.error('Error checking donor:', checkErr);
             return res.status(500).send('Database error');
@@ -86,17 +86,17 @@ router.put('/:id', (req, res) => {
         }
         
         // Update donor
-        db.query(
+        await pool.query(
             'UPDATE donors SET name = ?, email = ?, location = ?, phone = ?, creditcart = ?, isApproved = ?, description = ?, UpdatedAt = ? WHERE id = ?',
             [name, email, location || null, phone, creditcart || null, isApproved !== undefined ? isApproved : checkResults[0].isApproved, description || null, updatedAt, id],
-            (err, results) => {
+            async(err, results) => {
                 if (err) {
                     console.error('Error updating donor:', err);
                     return res.status(500).send('Database error');
                 }
                 
                 // Fetch updated donor data
-                db.query('SELECT * FROM donors WHERE id = ?', [id], (fetchErr, donorResults) => {
+                await pool.query('SELECT * FROM donors WHERE id = ?', [id], (fetchErr, donorResults) => {
                     if (fetchErr) {
                         console.error('Error fetching updated donor:', fetchErr);
                         return res.status(500).send('Database error');

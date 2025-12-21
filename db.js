@@ -1,20 +1,13 @@
-// db.js - MySQL connection for XAMPP
-import mysql from 'mysql2';
+import mysql from 'mysql2/promise';
 
-const db = mysql.createConnection({
+const pool = mysql.createPool({
   host: 'localhost',
   port: 3306,
   user: 'root',
-  password: '', // change if you set a password in XAMPP
-  database: 'helping hands'
+  password: '',
+  database: 'helping hands',
+  waitForConnections: true,
+  connectionLimit: 10
 });
 
-db.connect((err) => {
-  if (err) {
-    console.error('Error connecting to MySQL:', err);
-    process.exit(1);
-  }
-  console.log('MySQL Connected!');
-});
-
-export default db;
+export default pool;
