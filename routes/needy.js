@@ -19,25 +19,23 @@ router.get('/', async (req, res) => {
 
 /**
  * POST needy with PDF upload
- */
-router.post(
+ */router.post(
     '/',
     uploadPdf.single('pdf'),
     async (req, res) => {
         try {
-            const { name, email, location, phone, description } = req.body;
+            // 1. Destructure swift_number from the body
+            const { name, email, location, phone, description, swift_number } = req.body;
 
-            const documentPath = req.file
-                ? req.file.path
-                : null;
-
+            const documentPath = req.file ? req.file.path : null;
             const datenow = new Date();
             const isApproved = false;
 
+            // 2. Add swift_number to your INSERT statement
             const [result] = await pool.query(
                 `INSERT INTO needy 
-                (name, email, location, phone, isApproved, description, document_path, createdAt, UpdatedAt)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                (name, email, location, phone, isApproved, description, document_path, swift_number, createdAt, UpdatedAt)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 [
                     name,
                     email,
@@ -46,6 +44,7 @@ router.post(
                     isApproved,
                     description || null,
                     documentPath,
+                    swift_number || null, // Save the SWIFT code here
                     datenow,
                     datenow
                 ]
@@ -58,8 +57,8 @@ router.post(
 
             res.json(rows[0]);
         } catch (err) {
-            console.error(err);
-            res.status(500).json({ message: 'Upload failed' });
+            console.error("Backend Error:", err);
+            res.status(500).json({ message: 'Submission failed' });
         }
     }
 );
